@@ -1,0 +1,30 @@
+source_id: ofr_sec_mmf
+source_name: OFR Money Market Fund Monitor / SEC N-MFP
+role: mmf_assets_and_holdings
+status: executable_via_ofr_api
+frequency: monthly
+raw_storage: data/raw/ofr/
+access:
+  mode: ofr_api
+  source_url: https://data.financialresearch.gov/v1/series/dataset
+  official_landing_page: https://www.financialresearch.gov/short-term-funding-monitor/datasets/mmf/
+  dataset: mmf
+series:
+  total_mmf_assets: {series_key: MMF-MMF_TOT-M, unit: USD, standardized_unit: USD_millions}
+  total_treasury_holdings: {series_key: MMF-MMF_T_TOT-M, unit: USD, standardized_unit: USD_millions}
+  repo_holdings: {series_key: MMF-MMF_RP_TOT-M, unit: USD, standardized_unit: USD_millions}
+  treasury_repo_holdings: {series_key: MMF-MMF_RP_T_TOT-M, unit: USD, standardized_unit: USD_millions}
+  fed_reverse_repo_exposure: {series_key: MMF-MMF_RP_wFR-M, unit: USD, standardized_unit: USD_millions}
+  agency_holdings: {series_key: MMF-MMF_AG_TOT-M, unit: USD, standardized_unit: USD_millions}
+expected_fields:
+  - report_month
+  - total_mmf_assets
+  - treasury_holdings
+  - repo_holdings
+  - agency_holdings
+  - on_rrp_exposure
+monthly_aggregation:
+  monthly_levels: use reported month-end observations
+  standardization: convert OFR raw USD to USD_millions before joins
+notes:
+  - MMF holdings are central to distinguishing deposit drain from liquidity migration.

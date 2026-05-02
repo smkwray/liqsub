@@ -1,0 +1,33 @@
+upstream: tgarefill
+required_exports:
+  master_weekly_panel:
+    local_path: data/raw/tgarefill/master_weekly_panel.csv
+    source_hint: ../tgarefill/outputs/tables/master_weekly_panel.csv
+    required_columns:
+      - date
+      - tga_weekly_average
+      - reserve_balances_weekly_wednesday
+      - reverse_repos_weekly_wednesday
+      - commercial_bank_deposits_weekly_sa
+      - bill
+      - coupon
+      - bill_share
+  event_candidates:
+    local_path: data/raw/tgarefill/event_candidates.csv
+    source_hint: ../tgarefill/outputs/tables/event_candidates.csv
+    required_columns:
+      - event_id
+      - baseline_date
+      - start_date
+      - end_date
+      - delta_tga_event
+      - manual_tags
+  auction_shock_lp:
+    local_path: data/raw/tgarefill/auction_shock_lp.csv
+    source_hint: ../tgarefill/outputs/tables/auction_shock_lp.csv
+    required_columns:
+      - response_var
+      - horizon
+      - beta
+      - se_nw
+      - t_stat_nw

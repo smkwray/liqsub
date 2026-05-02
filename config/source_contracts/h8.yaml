@@ -1,0 +1,31 @@
+source_id: h8
+source_name: Federal Reserve H.8
+role: bank_deposits_cash_assets_securities
+status: executable_via_fred_and_fed_ddp
+frequency: weekly
+raw_storage: data/raw/fred/
+access:
+  mode: fred_csv
+  source_url: https://fred.stlouisfed.org/graph/fredgraph.csv
+  official_landing_page: https://www.federalreserve.gov/releases/h8/
+  official_ddp: https://www.federalreserve.gov/datadownload/choose.aspx?rel=h8
+  fallback: Federal Reserve Data Download Program H.8 package
+series:
+  deposits_sa: {fred_id: DPSACBW027SBOG, unit: USD_billions, standardized_unit: USD_millions, monthly_aggregation: month_end_last}
+  deposits_nsa: {fred_id: DPSACBW027NBOG, unit: USD_billions, standardized_unit: USD_millions, monthly_aggregation: month_end_last}
+  domestic_deposits_sa: {fred_id: DPSDCBW027SBOG, unit: USD_billions, standardized_unit: USD_millions, monthly_aggregation: month_end_last}
+  cash_assets_sa: {fred_id: CASACBW027SBOG, unit: USD_billions, standardized_unit: USD_millions, monthly_aggregation: month_end_last}
+  treasury_and_agency_securities_sa: {fred_id: TASACBW027SBOG, unit: USD_billions, standardized_unit: USD_millions, monthly_aggregation: month_end_last}
+  total_bank_credit: {fred_id: TOTBKCR, unit: USD_billions, standardized_unit: USD_millions, monthly_aggregation: month_end_last}
+expected_fields:
+  - week_or_release_date
+  - deposits
+  - cash_assets
+  - treasury_and_agency_securities
+  - loans
+  - bank_group
+monthly_aggregation:
+  weekly_levels: use last observation in calendar month
+  standardization: convert FRED billions to USD_millions before joins
+notes:
+  - H.8 deposits can be noisy at weekly frequency; monthly aggregation is first.

@@ -1,0 +1,32 @@
+source_id: rates
+source_name: Rate controls
+role: opportunity_cost_and_policy_rate_controls
+status: executable_via_fred
+frequency: daily_weekly_monthly
+raw_storage: data/raw/fred/
+access:
+  mode: fred_csv
+  source_url: https://fred.stlouisfed.org/graph/fredgraph.csv
+  official_api_docs: https://fred.stlouisfed.org/docs/api/fred/series_observations.html
+series:
+  iorb_rate: {fred_id: IORB, unit: percent, monthly_aggregation: monthly_mean}
+  fed_funds: {fred_id: EFFR, unit: percent, monthly_aggregation: monthly_mean}
+  sofr: {fred_id: SOFR, unit: percent, monthly_aggregation: monthly_mean}
+  bill_yield_1mo: {fred_id: DGS1MO, unit: percent, monthly_aggregation: monthly_mean}
+  bill_yield_3mo: {fred_id: DGS3MO, unit: percent, monthly_aggregation: monthly_mean}
+  bill_yield_6mo: {fred_id: DGS6MO, unit: percent, monthly_aggregation: monthly_mean}
+expected_fields:
+  - date
+  - bill_yield
+  - iorb_rate
+  - on_rrp_rate
+  - fed_funds
+  - sofr
+  - deposit_rate
+  - repo_spread
+monthly_aggregation:
+  daily_rates: arithmetic mean over calendar month
+  weekly_rates: arithmetic mean over observations in calendar month
+notes:
+  - Rate controls support high-rate/low-rate and opportunity-cost interactions.
+  - Deposit-rate source remains unresolved; FDIC or another official deposit-rate source is a later extension.

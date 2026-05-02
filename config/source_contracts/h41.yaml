@@ -1,0 +1,30 @@
+source_id: h41
+source_name: Federal Reserve H.4.1
+role: reserves_tga_on_rrp_fed_holdings
+status: executable_via_fred_and_fed_ddp
+frequency: weekly
+raw_storage: data/raw/fred/
+access:
+  mode: fred_csv
+  source_url: https://fred.stlouisfed.org/graph/fredgraph.csv
+  official_landing_page: https://www.federalreserve.gov/releases/h41/
+  official_ddp: https://www.federalreserve.gov/datadownload/choose.aspx?rel=H41
+  fallback: Federal Reserve Data Download Program H.4.1 package
+series:
+  reserves: {fred_id: WRESBAL, unit: USD_millions, monthly_aggregation: month_end_last}
+  treasury_general_account_wednesday: {fred_id: WDTGAL, unit: USD_millions, monthly_aggregation: month_end_last}
+  treasury_general_account_week_average: {fred_id: WTREGEN, unit: USD_millions, monthly_aggregation: month_end_last, caution: week_average_not_point_in_time}
+  fed_treasury_holdings: {fred_id: TREAST, unit: USD_millions, monthly_aggregation: month_end_last}
+  reverse_repurchase_agreements: {fred_id: WLRRAL, unit: USD_millions, monthly_aggregation: month_end_last}
+expected_fields:
+  - week_or_release_date
+  - reserves
+  - treasury_general_account
+  - reverse_repurchase_agreements
+  - fed_treasury_holdings
+monthly_aggregation:
+  weekly_levels: use last observation in calendar month
+  preferred_tga: DTS month-end close when available; otherwise WDTGAL, not WTREGEN
+notes:
+  - Align weekly fields to monthly panel with explicit aggregation rules.
+  - Distinguish WDTGAL point-in-time Wednesday level from WTREGEN week-average TGA.

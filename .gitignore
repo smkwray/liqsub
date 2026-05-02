@@ -1,0 +1,37 @@
+# Private planning notes
+do/
+do/**
+.env
+*.plan.md
+plan.md
+plans/
+
+# Local data and generated outputs stay inside the project tree, but are not tracked.
+data/raw/**
+data/interim/**
+data/clean/**
+data/cache/**
+output/**
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/raw/buycurve/.gitkeep
+!data/interim/.gitkeep
+!data/clean/.gitkeep
+!data/cache/.gitkeep
+!output/.gitkeep
+
+# Python build/test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/

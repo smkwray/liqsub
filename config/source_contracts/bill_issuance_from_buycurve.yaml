@@ -1,0 +1,23 @@
+source_id: bill_issuance_from_buycurve
+source_name: buycurve monthly issuance/maturity panel
+role: required_upstream_treasury_supply_input
+status: local_export_available
+frequency: monthly
+raw_storage: data/raw/buycurve/
+access:
+  mode: local_copy_from_buycurve_export
+  upstream_export: data/clean/monthly_issuance_maturity_panel.csv
+  local_import: data/raw/buycurve/monthly_issuance_maturity_panel.csv
+  upstream_project: buycurve
+expected_fields:
+  - month
+  - security_type
+  - maturity_bucket
+  - auction_count
+  - accepted_amount_sum
+  - offering_amount_sum
+  - weighted_maturity_years
+  - bill_share_by_accepted_amount
+notes:
+  - Do not duplicate Treasury auction maturity bucketing here.
+  - Use this panel to derive gross bill issuance, coupon issuance, bill share, and maturity-mix controls.

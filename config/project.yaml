@@ -1,0 +1,42 @@
+project: liqsub
+version: 0.1.0
+as_of_date: 2026-05-01
+objective: Deposits-MMFs-T-bills-ON RRP liquidity-substitution panel.
+start_order: second_after_buycurve_shared_panel
+assumptions:
+  reuse_buycurve_treasury_issuance_maturity_panel: true
+  duplicate_auction_maturity_logic: false
+  capstone_liquidity_weighted_tdc_index: out_of_scope
+  regime_splits_required: true
+paths:
+  raw_data: data/raw
+  interim_data: data/interim
+  clean_data: data/clean
+  output: output
+upstream_inputs:
+  buycurve_monthly_issuance_maturity_panel: data/raw/buycurve/monthly_issuance_maturity_panel.csv
+source_freshness:
+  default:
+    mtime_days: 90
+    observation_days: null
+  manual:
+    mtime_days: 365
+    observation_days: null
+  buycurve:
+    mtime_days: 90
+    observation_days: 120
+  tgarefill:
+    mtime_days: 90
+    observation_days: null
+  fred:
+    mtime_days: 30
+    observation_days: 90
+  fiscaldata:
+    mtime_days: 30
+    observation_days: 45
+  ofr:
+    mtime_days: 30
+    observation_days: 75
+analysis:
+  weekly_large_rebuild:
+    randomization_p_max: 0.10

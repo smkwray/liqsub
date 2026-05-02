@@ -1,0 +1,27 @@
+upstream_project: buycurve
+required_before_liqsub_mvp:
+  monthly_issuance_maturity_panel:
+    upstream_export_path: data/clean/monthly_issuance_maturity_panel.csv
+    liqsub_local_import_path: data/raw/buycurve/monthly_issuance_maturity_panel.csv
+    grain: month x security_type x maturity_bucket
+    required_columns:
+      - month
+      - security_type
+      - maturity_bucket
+      - auction_count
+      - accepted_amount_sum
+      - offering_amount_sum
+      - weighted_maturity_years
+      - bill_share_by_accepted_amount
+    planned_derived_liqsub_fields:
+      - gross_bill_issuance
+      - gross_coupon_issuance
+      - bill_share
+      - maturity_mix_controls
+      - settlement_month
+      - bill_share_shock_todo
+optional_later:
+  monthly_buyer_shares:
+    upstream_export_path: data/clean/monthly_buyer_shares.csv
+    liqsub_local_import_path: data/raw/buycurve/monthly_buyer_shares.csv
+    use: optional holder-base controls; not needed for first liquidity-substitution MVP

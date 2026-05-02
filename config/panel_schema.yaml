@@ -1,0 +1,62 @@
+version: 0.1.0
+panels:
+  monthly_liquidity_substitution_panel:
+    grain: one row per calendar month
+    build_status: backend_mvp_available
+    required_upstream:
+      - data/raw/buycurve/monthly_issuance_maturity_panel.csv
+    fields:
+      month: {dtype: date, nullable: false}
+      gross_bill_issuance: {dtype: float, unit: USD_millions, source: bill_issuance_from_buycurve}
+      bill_share: {dtype: float, source: bill_issuance_from_buycurve}
+      coupon_issuance: {dtype: float, unit: USD_millions, source: bill_issuance_from_buycurve}
+      weighted_maturity_years: {dtype: float, source: bill_issuance_from_buycurve}
+      deposits: {dtype: float, unit: USD_millions, source: h8}
+      domestic_deposits: {dtype: float, unit: USD_millions, source: h8}
+      cash_assets: {dtype: float, unit: USD_millions, source: h8}
+      bank_treasury_agency_securities: {dtype: float, unit: USD_millions, source: h8}
+      retail_mmf_assets: {dtype: float, unit: USD_millions, source: derived}
+      institutional_mmf_assets: {dtype: float, unit: USD_millions, source: derived}
+      total_mmf_assets: {dtype: float, unit: USD_millions, source: ofr_sec_mmf}
+      mmf_treasury_holdings: {dtype: float, unit: USD_millions, source: ofr_sec_mmf}
+      mmf_repo_holdings: {dtype: float, unit: USD_millions, source: ofr_sec_mmf}
+      mmf_on_rrp_exposure: {dtype: float, unit: USD_millions, source: ofr_sec_mmf}
+      on_rrp: {dtype: float, unit: USD_millions, source: on_rrp_operations}
+      reserves: {dtype: float, unit: USD_millions, source: h41}
+      tga: {dtype: float, unit: USD_millions, source: dts}
+      iorb_rate: {dtype: float, source: rates}
+      on_rrp_rate: {dtype: float, source: rates}
+      sofr: {dtype: float, source: rates}
+      bill_yield: {dtype: float, source: rates}
+      bill_yield_1mo: {dtype: float, source: rates}
+      bill_yield_3mo: {dtype: float, source: rates}
+      bill_yield_6mo: {dtype: float, source: rates}
+      on_rrp_regime: {dtype: string, source: derived, values: [abundant, transition, scarce]}
+    roadmap_fields:
+      net_bill_issuance: {dtype: float, unit: USD_millions, source: dts, available_in_snapshot: false}
+      bill_share_shock: {dtype: float, source: derived, available_in_snapshot: false}
+      deposit_rate: {dtype: float, source: rates, available_in_snapshot: false}
+      qe_qt_regime: {dtype: string, source: derived, available_in_snapshot: false}
+  weekly_liquidity_substitution_panel:
+    grain: one row per week ending date
+    build_status: backend_mvp_available
+    required_upstream:
+      - data/raw/tgarefill/master_weekly_panel.csv
+    fields:
+      week: {dtype: date, nullable: false}
+      gross_bill_settlement_100b: {dtype: float, unit: USD_100b, source: tgarefill}
+      coupon_settlement_100b: {dtype: float, unit: USD_100b, source: tgarefill}
+      bill_size_surprise_100b: {dtype: float, unit: USD_100b, source: tgarefill}
+      bill_share: {dtype: float, source: tgarefill}
+      deposits: {dtype: float, unit: USD_millions, source: h8}
+      on_rrp: {dtype: float, unit: USD_millions, source: on_rrp_operations}
+      reserves: {dtype: float, unit: USD_millions, source: h41}
+      tga: {dtype: float, unit: USD_millions, source: dts}
+      mmf_treasury_holdings: {dtype: float, unit: USD_millions, source: ofr_sec_mmf}
+      mmf_repo_total: {dtype: float, unit: USD_millions, source: ofr_sec_mmf}
+      on_rrp_regime_pre: {dtype: string, source: derived}
+      terminal_completeness_status: {dtype: string, source: derived}
+      baseline_estimation_use: {dtype: string, source: derived}
+    roadmap_fields:
+      same_tenor_auction_size_surprise: {dtype: float, source: bill_issuance_from_buycurve, available_in_snapshot: false}
+      rate_controls: {dtype: object, source: rates, available_in_snapshot: false}

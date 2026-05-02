@@ -1,0 +1,35 @@
+source_id: tgarefill
+source_name: tgarefill weekly upstream exports
+role: weekly_tga_rebuild_event_and_plumbing_scaffold
+status: local_export_available
+frequency: weekly
+raw_storage: data/raw/tgarefill/
+access:
+  mode: local_copy_from_tgarefill_exports
+  upstream_project: tgarefill
+  upstream_exports:
+    master_weekly_panel: outputs/tables/master_weekly_panel.csv
+    event_candidates: outputs/tables/event_candidates.csv
+    auction_shock_lp: outputs/tables/auction_shock_lp.csv
+  local_imports:
+    master_weekly_panel: data/raw/tgarefill/master_weekly_panel.csv
+    event_candidates: data/raw/tgarefill/event_candidates.csv
+    auction_shock_lp: data/raw/tgarefill/auction_shock_lp.csv
+expected_fields:
+  - date
+  - tga_weekly_average
+  - reserve_balances_weekly_wednesday
+  - reverse_repos_weekly_wednesday
+  - commercial_bank_deposits_weekly_sa
+  - bill
+  - coupon
+  - bill_share
+  - event_id
+  - baseline_date
+  - start_date
+  - end_date
+monthly_aggregation:
+  weekly_exports: not aggregated; consumed at native weekly grain
+notes:
+  - This project treats tgarefill as an upstream local export boundary and validates copied files before weekly builds.
+  - The frozen source snapshot should preserve the copied local files and their hashes.

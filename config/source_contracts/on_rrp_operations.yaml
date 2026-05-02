@@ -1,0 +1,24 @@
+source_id: on_rrp_operations
+source_name: New York Fed ON RRP operations data
+role: daily_on_rrp_usage_and_regime_splits
+status: executable_via_fred_with_nyfed_crosscheck
+frequency: daily
+raw_storage: data/raw/fred/
+access:
+  mode: fred_csv
+  source_url: https://fred.stlouisfed.org/graph/fredgraph.csv
+  official_landing_page: https://www.newyorkfed.org/markets/desk-operations/reverse-repo
+  nyfed_markets_data: https://www.newyorkfed.org/markets/data-hub
+series:
+  on_rrp_total: {fred_id: RRPONTSYD, unit: USD_billions, standardized_unit: USD_millions, monthly_aggregation: monthly_mean}
+expected_fields:
+  - date
+  - operation_amount
+  - rate
+  - counterparty_count
+monthly_aggregation:
+  operation_amount: arithmetic mean over calendar month for level/regime work; month-end last can be added for robustness
+  rate: arithmetic mean over calendar month when NY Fed operation-rate detail is added
+notes:
+  - Regime splits should distinguish ON RRP abundant, transition, and scarce periods.
+  - FRED RRPONTSYD supplies total daily ON RRP volume; NY Fed operation data remains the cross-check for rate and counterparty detail.
