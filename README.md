@@ -31,6 +31,8 @@ data/raw/buycurve/monthly_issuance_maturity_panel.csv
 data/raw/tgarefill/master_weekly_panel.csv
 data/raw/tgarefill/event_candidates.csv
 data/raw/tgarefill/auction_shock_lp.csv
+data/raw/tgarefill/canonical_bill_surprise_shocks.csv
+data/raw/tgarefill/promotion_robustness_summary.csv
 data/manual/event_calendar_context.csv
 data/manual/weekly_large_rebuild_calendar_context.csv
 ```
@@ -108,9 +110,11 @@ output/tables/weekly_design_readiness.csv
 output/tables/weekly_stability_candidates.csv
 output/tables/weekly_large_rebuild_cell_summary.csv
 output/tables/weekly_large_rebuild_final_review.csv
+output/tables/tgarefill_promotion_reconciliation.csv
 output/reports/monthly_mvp_report.md
 output/reports/weekly_identification_candidate_report.md
 output/reports/weekly_large_rebuild_diagnostic_report.md
+output/reports/tgarefill_promotion_reconciliation.md
 output/reports/evidence_gate_summary.md
 ```
 
@@ -134,6 +138,8 @@ The backend is useful for:
 - auditing source coverage, cache state, and generated artifacts;
 - checking whether broad monthly or weekly designs pass conservative readiness gates;
 - preserving narrow descriptive diagnostics around large TGA rebuild episodes.
+- reconciling the promoted `tgarefill` bill-surprise result with the blocked broad-substitution
+  evidence gate.
 
 The backend should not be used to claim:
 
@@ -141,6 +147,11 @@ The backend should not be used to claim:
 - a headline deposit, MMF, reserve, or ON RRP mechanism result;
 - a uniformly covered 1973-2026 mechanism panel;
 - live-current source coverage after the frozen snapshot date.
+
+The promoted `tgarefill` import is deliberately narrower than the blocked broad substitution
+design: bill surprises during the selected TGA rebuild sample are associated with MMF Treasury
+holdings and ON RRP balances. This is aggregate association evidence, not a causal funding-route
+or funding-share estimate. Fund-level MMF allocation imports remain separate descriptive context.
 
 Partially observed terminal periods are preserved in clean panels but marked out of estimation with
 `baseline_estimation_use=exclude_from_causal_baseline`; see:

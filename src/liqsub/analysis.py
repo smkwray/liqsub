@@ -1956,12 +1956,14 @@ def evidence_gate_summary(root: Path) -> pd.DataFrame:
     weekly_claim = _read_csv_or_empty(table_dir / "weekly_design_readiness.csv")
     large_final = _read_csv_or_empty(table_dir / "weekly_large_rebuild_final_review.csv")
     large_cells = _read_csv_or_empty(table_dir / "weekly_large_rebuild_cell_summary.csv")
+    promotion = _read_csv_or_empty(table_dir / "tgarefill_promotion_reconciliation.csv")
     rows = [
         _monthly_broad_gate_row(monthly_claim),
         _monthly_on_rrp_gate_row(monthly_on_rrp),
         _monthly_mmf_gate_row(monthly_shortlist, monthly_claim),
         _weekly_broad_gate_row(weekly_stable, weekly_claim),
         _weekly_large_rebuild_gate_row(large_final, large_cells),
+        _tgarefill_promotion_gate_row(promotion),
         _negative_evidence_gate_row(monthly_claim, weekly_stable),
     ]
     return pd.DataFrame(rows, columns=INTERNAL_EVIDENCE_GATE_COLUMNS)
@@ -2151,6 +2153,38 @@ def _negative_evidence_gate_row(monthly_claim: pd.DataFrame, weekly_stable: pd.D
         "primary_artifacts": "monthly_readiness_summary.csv;weekly_stability_candidates.csv;weekly_large_rebuild_diagnostic_report.md",
         "binding_blockers": "current broad designs fail diagnostic gates",
         "next_design_step": "keep broad diagnostics separate from targeted reserve-plumbing diagnostics",
+    }
+
+
+def _tgarefill_promotion_gate_row(promotion: pd.DataFrame) -> dict[str, object]:
+    if promotion.empty:
+        return {
+            "design_path": "tgarefill_focused_refill_bill_surprise",
+            "status": "not_imported",
+            "claim_use": "pending_import",
+            "evidence_basis": "promotion reconciliation table missing",
+            "primary_artifacts": "tgarefill_promotion_reconciliation.csv",
+            "binding_blockers": "copy promoted tgarefill artifacts and run analyze-weekly",
+            "next_design_step": "import tgarefill promoted summary",
+        }
+    supported = promotion.loc[promotion["status"] == "supported_focused_claim"]
+    boundaries = promotion.loc[promotion["status"] == "not_supported_as_channel"]
+    complete = (set(supported["channel"]) == {"MMF Treasury Holdings", "ON RRP"}
+                and not supported.duplicated("channel").any())
+    effects = []
+    for row in supported.itertuples(index=False):
+        effects.append(f"{row.channel} {float(row.h4_effect_bn):+.1f}B t={float(row.h4_t_stat_nw):.1f}")
+    return {
+        "design_path": "tgarefill_focused_refill_bill_surprise",
+        "status": "supported_focused_claim" if complete else "partial_support"
+        if not supported.empty else "blocked_incomplete_evidence",
+        "claim_use": "aggregate_association_with_boundaries" if complete else "diagnostic",
+        "evidence_basis": "; ".join(effects) or "no supported promoted channels",
+        "primary_artifacts": "tgarefill_promotion_reconciliation.csv;promotion_robustness_summary.csv;canonical_bill_surprise_shocks.csv",
+        "binding_blockers": (
+            f"broad liqsub substitution remains blocked; {len(boundaries)} bank/reserve boundary rows"
+        ),
+        "next_design_step": "retain aggregate association; do not infer causal funding routes or shares",
     }
 
 

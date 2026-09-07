@@ -27,6 +27,11 @@ INPUT_PATHS = [
     "data/raw/tgarefill/master_weekly_panel.csv",
     "data/raw/tgarefill/event_candidates.csv",
     "data/raw/tgarefill/auction_shock_lp.csv",
+    "data/raw/tgarefill/canonical_bill_surprise_shocks.csv",
+    "data/raw/tgarefill/promotion_robustness_summary.csv",
+    "data/raw/tgarefill/mmfalloc_downstream_summary.csv",
+    "data/raw/tgarefill/mmfalloc_source_gates.csv",
+    "data/raw/tgarefill/mmfalloc_baseline.csv",
     "data/raw/fiscaldata/dts_operating_cash_balance.csv",
     "data/raw/ofr/mmf.json",
     "data/manual/event_calendar_context.csv",
@@ -41,6 +46,7 @@ KEY_OUTPUTS = [
     "output/tables/monthly_readiness_summary.csv",
     "output/tables/weekly_design_readiness.csv",
     "output/tables/weekly_stability_candidates.csv",
+    "output/tables/tgarefill_promotion_reconciliation.csv",
     "output/tables/public_output_aliases.csv",
     "output/tables/backend_input_inventory.csv",
     "output/tables/evidence_gate_summary.csv",
@@ -49,6 +55,7 @@ KEY_OUTPUTS = [
     "output/reports/weekly_identification_candidate_report.md",
     "output/reports/weekly_large_rebuild_diagnostic_report.md",
     "output/reports/evidence_gate_summary.md",
+    "output/reports/tgarefill_promotion_reconciliation.md",
 ]
 
 STABLE_PUBLIC_TABLES = [
@@ -79,12 +86,14 @@ STABLE_PUBLIC_TABLES = [
     "output/tables/weekly_large_rebuild_match_quality.csv",
     "output/tables/weekly_large_rebuild_randomization_inference.csv",
     "output/tables/weekly_large_rebuild_final_review.csv",
+    "output/tables/tgarefill_promotion_reconciliation.csv",
 ]
 
 STABLE_PUBLIC_REPORTS = [
     "output/reports/monthly_candidate_review_report.md",
     "output/reports/evidence_gate_summary.md",
     "output/reports/weekly_large_rebuild_diagnostic_report.md",
+    "output/reports/tgarefill_promotion_reconciliation.md",
 ]
 
 REBUILD_LINEAGE_PATH = "output/manifests/latest_successful_rebuild.json"

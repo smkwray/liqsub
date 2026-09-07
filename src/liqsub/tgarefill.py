@@ -236,6 +236,70 @@ TGAREFILL_EXPORTS = {
         "required": ["response_var", "horizon", "beta", "se_nw", "t_stat_nw"],
         "numeric_columns": ["horizon", "beta", "se_nw", "t_stat_nw"],
     },
+    "canonical_bill_surprise_shocks": {
+        "path": Path("data/raw/tgarefill/canonical_bill_surprise_shocks.csv"),
+        "required": [
+            "date",
+            "bill_size_surprise",
+            "bill_size_surprise_announcement_week",
+            "tax_receipt_surprise",
+            "rapid_rebuild_flag",
+            "sample",
+            "canonical_sample_end",
+        ],
+        "date_columns": ["date"],
+        "numeric_columns": [
+            "bill_size_surprise",
+            "bill_size_surprise_announcement_week",
+            "tax_receipt_surprise",
+            "rapid_rebuild_flag",
+        ],
+        "unique_columns": ["date"],
+    },
+    "promotion_robustness_summary": {
+        "path": Path("data/raw/tgarefill/promotion_robustness_summary.csv"),
+        "required": [
+            "spec",
+            "response_var",
+            "response_label",
+            "shock_sd_bn",
+            "h4_effect_bn",
+            "h4_t_stat_nw",
+            "h4_significant_5pct",
+        ],
+        "numeric_columns": [
+            "shock_sd_bn",
+            "placebo_significant_count",
+            "all_channel_placebo_significant_count",
+            "h4_effect_bn",
+            "h4_t_stat_nw",
+        ],
+    },
+    "mmfalloc_downstream_summary": {
+        "path": Path("data/raw/tgarefill/mmfalloc_downstream_summary.csv"),
+        "required": ["metric", "value", "unit", "note"],
+    },
+    "mmfalloc_source_gates": {
+        "path": Path("data/raw/tgarefill/mmfalloc_source_gates.csv"),
+        "required": ["gate", "passed", "value", "threshold", "note"],
+    },
+    "mmfalloc_baseline": {
+        "path": Path("data/raw/tgarefill/mmfalloc_baseline.csv"),
+        "required": [
+            "event_month",
+            "horizon",
+            "category",
+            "delta_millions",
+            "event_bill_surprise_millions",
+            "delta_per_bill_surprise",
+        ],
+        "date_columns": ["event_month"],
+        "numeric_columns": [
+            "delta_millions",
+            "event_bill_surprise_millions",
+            "delta_per_bill_surprise",
+        ],
+    },
 }
 
 
@@ -505,6 +569,10 @@ def write_weekly_analysis(root: Path) -> dict[str, object]:
         "large_rebuild_final_review": table_dir / "weekly_large_rebuild_final_review.csv",
         "large_rebuild_blocker_summary": table_dir
         / "weekly_large_rebuild_blocker_summary.csv",
+        "tgarefill_promotion_reconciliation": table_dir
+        / "tgarefill_promotion_reconciliation.csv",
+        "tgarefill_promotion_reconciliation_report": report_dir
+        / "tgarefill_promotion_reconciliation.md",
         "large_rebuild_reserves_plot": report_dir / "weekly_large_rebuild_reserves_event_time.svg",
         "large_rebuild_on_rrp_plot": report_dir / "weekly_large_rebuild_on_rrp_event_time.svg",
         "large_rebuild_diagnostic_writeup": report_dir
@@ -570,6 +638,12 @@ def write_weekly_analysis(root: Path) -> dict[str, object]:
     large_rebuild_final.to_csv(outputs["large_rebuild_final_review"], index=False)
     large_rebuild_blockers = weekly_large_rebuild_blocker_summary(large_rebuild_cell_summary)
     large_rebuild_blockers.to_csv(outputs["large_rebuild_blocker_summary"], index=False)
+    promotion_reconciliation = tgarefill_promotion_reconciliation(root)
+    promotion_reconciliation.to_csv(outputs["tgarefill_promotion_reconciliation"], index=False)
+    write_tgarefill_promotion_reconciliation_report(
+        promotion_reconciliation,
+        path=outputs["tgarefill_promotion_reconciliation_report"],
+    )
     weekly_large_rebuild_event_time_svg(
         root,
         analysis_panel,
@@ -650,6 +724,275 @@ def weekly_upstream_qa(root: Path, panel: pd.DataFrame) -> pd.DataFrame:
         }
     )
     return pd.DataFrame(rows)
+
+
+def _observed_bool(value: object) -> bool | None:
+    text = str(value).strip().lower()
+    if text == "true":
+        return True
+    if text == "false":
+        return False
+    return None
+
+
+def tgarefill_promotion_reconciliation(root: Path) -> pd.DataFrame:
+    """Summarize the promoted upstream tgarefill claim alongside liqsub gates."""
+    summary_path = root / TGAREFILL_EXPORTS["promotion_robustness_summary"]["path"]
+    if not summary_path.exists():
+        return pd.DataFrame(
+            [
+                {
+                    "claim_id": "focused_tga_refill_bill_surprise",
+                    "status": "blocked_missing_upstream",
+                    "claim_use": "not_available",
+                    "evidence_basis": "upstream_summary_unavailable",
+                    "channel": "unavailable",
+                    "h4_effect_bn": pd.NA,
+                    "h4_t_stat_nw": pd.NA,
+                    "significant_5pct": pd.NA,
+                    "pretrend_status": "missing_upstream_summary",
+                    "broad_substitution_reconciliation": "broad_liqsub_substitution_remains_blocked",
+                    "permitted_language": "",
+                    "forbidden_upgrade": "do_not_claim_general_bill_deposit_substitution",
+                    "primary_artifacts": str(summary_path.relative_to(root)),
+                }
+            ]
+        )
+    summary = pd.read_csv(summary_path)
+    required = TGAREFILL_EXPORTS["promotion_robustness_summary"]["required"]
+    if any(column not in summary for column in required):
+        raise ValueError("Incomplete upstream promotion summary schema")
+    if summary.duplicated(["spec", "response_label"]).any():
+        raise ValueError("Duplicate upstream promotion specification/channel")
+    canonical = summary.loc[summary["spec"] == "canonical_issue_week"].copy()
+    same_week = summary.loc[summary["spec"] == "same_week_announcement_timing"].copy()
+    rows: list[dict[str, object]] = []
+    promoted_channels = {"MMF Treasury Holdings", "ON RRP"}
+    non_promoted_channels = {"Bank Deposits", "Reserves"}
+    same_week_pretrend_hits = _promotion_pretrend_hits(same_week)
+    for row in canonical.itertuples(index=False):
+        channel = str(row.response_label)
+        h4_effect = pd.to_numeric(pd.Series([row.h4_effect_bn]), errors="coerce").iloc[0]
+        t_stat = pd.to_numeric(pd.Series([row.h4_t_stat_nw]), errors="coerce").iloc[0]
+        significant = _observed_bool(row.h4_significant_5pct)
+        evidence_complete = (
+            significant is not None and np.isfinite(h4_effect) and np.isfinite(t_stat)
+            and channel in same_week_pretrend_hits
+        )
+        expected_direction = (channel == "MMF Treasury Holdings" and h4_effect > 0) or (
+            channel == "ON RRP" and h4_effect < 0
+        )
+        if not evidence_complete:
+            status = "blocked_incomplete_evidence"
+            claim_use = "not_available"
+            permitted = ""
+        elif (channel in promoted_channels and significant and expected_direction
+              and same_week_pretrend_hits[channel] == 0):
+            status = "supported_focused_claim"
+            claim_use = "aggregate_association"
+            permitted = (
+                "Bill surprises during the selected TGA rebuild sample are associated with "
+                "higher MMF Treasury holdings and lower ON RRP balances."
+            )
+        elif channel in non_promoted_channels and not significant:
+            status = "not_supported_as_channel"
+            claim_use = "boundary_condition"
+            permitted = "No robust bank-deposit or reserve drain in the promoted design."
+        else:
+            status = "appendix_context"
+            claim_use = "diagnostic"
+            permitted = "Use only as supporting context."
+        rows.append(
+            {
+                "claim_id": "focused_tga_refill_bill_surprise",
+                "status": status,
+                "claim_use": claim_use,
+                "evidence_basis": "tgarefill_canonical_pre_rmp_bill_surprise_lp",
+                "channel": channel,
+                "h4_effect_bn": h4_effect,
+                "h4_t_stat_nw": t_stat,
+                "significant_5pct": significant,
+                "pretrend_status": (
+                    "missing_same_week_placebo_evidence"
+                    if channel not in same_week_pretrend_hits
+                    else "same_week_timing_has_no_significant_placebo"
+                    if same_week_pretrend_hits[channel] == 0
+                    else "same_week_timing_has_remaining_placebo"
+                ),
+                "broad_substitution_reconciliation": (
+                    "broad_liqsub_substitution_remains_blocked"
+                ),
+                "permitted_language": permitted,
+                "forbidden_upgrade": (
+                    "do_not_claim_causal_effect_final_ownership_funding_share_or_bill_deposit_substitution"
+                ),
+                "primary_artifacts": (
+                    "data/raw/tgarefill/promotion_robustness_summary.csv;"
+                    "data/raw/tgarefill/canonical_bill_surprise_shocks.csv;"
+                    "data/raw/tgarefill/auction_shock_lp.csv"
+                ),
+            }
+        )
+    rows.extend(_mmfalloc_validation_rows(root))
+    return pd.DataFrame(rows)
+
+
+def _mmfalloc_validation_rows(root: Path) -> list[dict[str, object]]:
+    summary_path = root / TGAREFILL_EXPORTS["mmfalloc_downstream_summary"]["path"]
+    gates_path = root / TGAREFILL_EXPORTS["mmfalloc_source_gates"]["path"]
+    baseline_path = root / TGAREFILL_EXPORTS["mmfalloc_baseline"]["path"]
+    if not summary_path.exists():
+        return []
+    summary = pd.read_csv(summary_path)
+    summary_values = {
+        str(row.metric): row.value for row in summary.itertuples(index=False)
+    }
+    gates_passed = _observed_bool(summary_values.get("source_gates_passed")) is True
+    gates_passed = gates_passed and not summary.duplicated("metric").any()
+    if gates_path.exists() and baseline_path.exists():
+        gates = pd.read_csv(gates_path)
+        baseline = pd.read_csv(baseline_path)
+        required_gates = {"coverage", "required_fields", "mapping", "reconciliation"}
+        gates_passed = gates_passed and (
+            {"gate", "passed"}.issubset(gates.columns)
+            and required_gates.issubset(set(gates["gate"]))
+            and not gates.duplicated("gate").any()
+            and gates["passed"].map(_observed_bool).eq(True).all()
+            and not baseline.empty
+            and set(TGAREFILL_EXPORTS["mmfalloc_baseline"]["required"]).issubset(baseline.columns)
+        )
+        if gates_passed:
+            for column in TGAREFILL_EXPORTS["mmfalloc_baseline"]["numeric_columns"]:
+                gates_passed = gates_passed and np.isfinite(
+                    pd.to_numeric(baseline[column], errors="coerce")
+                ).all()
+    else:
+        gates_passed = False
+    claim_label = str(summary_values.get("claim_boundary", ""))
+    status = "imported_descriptive_allocation" if gates_passed else "blocked_mmfalloc_gates"
+    return [
+        {
+            "claim_id": "focused_tga_refill_mmfalloc_validation",
+            "status": status,
+            "claim_use": "descriptive_context" if gates_passed else "not_available",
+            "evidence_basis": "sec_nmfp_fund_level_mmf_allocation_validation",
+            "channel": "Fund-level MMF allocation",
+            "h4_effect_bn": pd.NA,
+            "h4_t_stat_nw": pd.NA,
+            "significant_5pct": pd.NA,
+            "pretrend_status": "see_mmfalloc_placebos",
+            "broad_substitution_reconciliation": (
+                "broad_liqsub_substitution_remains_blocked"
+            ),
+            "permitted_language": (
+                "Imported fund-level MMF allocation changes describe selected "
+                "positive bill-surprise months; they do not identify causal funding routes."
+            ) if gates_passed else "",
+            "forbidden_upgrade": (
+                "do_not_claim_household_behavior_final_ownership_bank_deposit_pass_through_"
+                "or_general_bill_deposit_substitution"
+            ),
+            "primary_artifacts": (
+                f"{summary_path.relative_to(root)};"
+                f"{gates_path.relative_to(root)};"
+                f"{baseline_path.relative_to(root)}"
+            ),
+            "claim_label": claim_label,
+            "sample_start": summary_values.get("sample_start", ""),
+            "sample_end": summary_values.get("sample_end", ""),
+            "event_count": summary_values.get("event_count", ""),
+            "mean_event_delta_treasury_total": summary_values.get(
+                "mean_event_delta_treasury_total", ""
+            ),
+            "mean_event_delta_fed_onrrp": summary_values.get("mean_event_delta_fed_onrrp", ""),
+            "mean_event_delta_repo_ex_fed": summary_values.get(
+                "mean_event_delta_repo_ex_fed", ""
+            ),
+        }
+    ]
+
+
+def _promotion_pretrend_hits(summary: pd.DataFrame) -> dict[str, int]:
+    if summary.empty or not {"response_label", "placebo_significant_count"}.issubset(summary.columns):
+        return {}
+    hits = pd.to_numeric(summary["placebo_significant_count"], errors="coerce")
+    return {
+        str(label): int(hit)
+        for label, hit in zip(summary["response_label"], hits, strict=False)
+        if pd.notna(hit) and np.isfinite(hit) and hit >= 0 and hit == int(hit)
+    }
+
+
+def write_tgarefill_promotion_reconciliation_report(
+    reconciliation: pd.DataFrame,
+    *,
+    path: Path,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if reconciliation.empty:
+        path.write_text("# Tgarefill Promotion Reconciliation\n\nNo promotion rows available.\n", encoding="utf-8")
+        return
+    promoted = reconciliation.loc[reconciliation["status"] == "supported_focused_claim"]
+    blocked = reconciliation.loc[reconciliation["status"] == "not_supported_as_channel"]
+    mmfalloc = reconciliation.loc[
+        reconciliation["status"].astype(str).isin(
+            ["imported_descriptive_allocation", "blocked_mmfalloc_gates"]
+        )
+    ]
+    lines = [
+        "# Tgarefill Promotion Reconciliation",
+        "",
+        "## Bottom Line",
+        "",
+        (
+            "Broad `liqsub` substitution remains blocked, but the focused `tgarefill` "
+            "bill-surprise summary is imported only as aggregate association evidence "
+            "when both named channels have complete qualifying rows."
+        ),
+        "",
+        "## Promoted Channels",
+        "",
+    ]
+    for row in promoted.itertuples(index=False):
+        lines.append(
+            f"- {row.channel}: h=4 effect {float(row.h4_effect_bn):+.1f}B, "
+            f"NW t-stat {float(row.h4_t_stat_nw):.1f}."
+        )
+    lines.extend(["", "## Boundary Channels", ""])
+    for row in blocked.itertuples(index=False):
+        lines.append(
+            f"- {row.channel}: h=4 effect {float(row.h4_effect_bn):+.1f}B, "
+            f"NW t-stat {float(row.h4_t_stat_nw):.1f}; not promoted."
+        )
+    if not mmfalloc.empty:
+        lines.extend(["", "## Fund-Level MMF Validation", ""])
+        for row in mmfalloc.itertuples(index=False):
+            if str(row.status) == "imported_descriptive_allocation":
+                lines.append(
+                    "- SEC N-MFP `mmfalloc`: source gates pass for "
+                    f"{row.sample_start} through {row.sample_end}; across "
+                    f"{row.event_count} selected positive bill-surprise months, "
+                    f"Treasury allocations rise {float(row.mean_event_delta_treasury_total):+.1f}M, "
+                    f"Fed ON RRP changes {float(row.mean_event_delta_fed_onrrp):+.1f}M, "
+                    f"and repo ex-Fed changes {float(row.mean_event_delta_repo_ex_fed):+.1f}M."
+                )
+            else:
+                lines.append("- SEC N-MFP `mmfalloc`: validation gates did not pass.")
+        lines.append(
+            "Use this only as descriptive allocation context, separate from the canonical aggregate design."
+        )
+    lines.extend(
+        [
+            "",
+            "## Claim Boundary",
+            "",
+            "Do not claim general bill-deposit substitution or a stable one-for-one liquidity-substitution system.",
+            "Use this only for unexpected bill issuance during TGA rebuilds.",
+            "Do not infer household behavior, final ownership, or bank-deposit pass-through from the MMF panel.",
+            "",
+        ]
+    )
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def weekly_timing_alignment_qa(panel: pd.DataFrame) -> pd.DataFrame:

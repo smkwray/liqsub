@@ -526,6 +526,17 @@ PUBLIC_OUTPUT_REQUIRED_COLUMNS = {
         "status",
         "rows",
     ],
+    "output/tables/tgarefill_promotion_reconciliation.csv": [
+        "claim_id",
+        "status",
+        "claim_use",
+        "evidence_basis",
+        "channel",
+        "h4_effect_bn",
+        "h4_t_stat_nw",
+        "broad_substitution_reconciliation",
+        "forbidden_upgrade",
+    ],
 }
 
 PUBLIC_OUTPUT_DATE_COLUMNS = {
@@ -852,6 +863,13 @@ PUBLIC_OUTPUT_REQUIRED_TEXT_COLUMNS = {
         "status",
     ],
     "output/tables/weekly_stable_claim_candidates.csv": ["outcome", "status"],
+    "output/tables/tgarefill_promotion_reconciliation.csv": [
+        "claim_id",
+        "status",
+        "claim_use",
+        "evidence_basis",
+        "channel",
+    ],
 }
 
 PUBLIC_OUTPUT_ALIASES = {

@@ -11,10 +11,16 @@ access:
     master_weekly_panel: outputs/tables/master_weekly_panel.csv
     event_candidates: outputs/tables/event_candidates.csv
     auction_shock_lp: outputs/tables/auction_shock_lp.csv
+    canonical_bill_surprise_shocks: outputs/tables/canonical_bill_surprise_shocks.csv
+    promotion_robustness_summary: outputs/tables/promotion_robustness_summary.csv
+    promotion_memo: outputs/tgarefill_promotion_memo.md
   local_imports:
     master_weekly_panel: data/raw/tgarefill/master_weekly_panel.csv
     event_candidates: data/raw/tgarefill/event_candidates.csv
     auction_shock_lp: data/raw/tgarefill/auction_shock_lp.csv
+    canonical_bill_surprise_shocks: data/raw/tgarefill/canonical_bill_surprise_shocks.csv
+    promotion_robustness_summary: data/raw/tgarefill/promotion_robustness_summary.csv
+    promotion_memo: data/raw/tgarefill/tgarefill_promotion_memo.md
 expected_fields:
   - date
   - tga_weekly_average
@@ -28,8 +34,13 @@ expected_fields:
   - baseline_date
   - start_date
   - end_date
+  - bill_size_surprise
+  - bill_size_surprise_announcement_week
+  - h4_effect_bn
+  - h4_t_stat_nw
 monthly_aggregation:
   weekly_exports: not aggregated; consumed at native weekly grain
 notes:
   - This project treats tgarefill as an upstream local export boundary and validates copied files before weekly builds.
   - The frozen source snapshot should preserve the copied local files and their hashes.
+  - The promotion exports are claim-governance artifacts: broad substitution remains blocked, while focused TGA-refill bill-surprise results are aggregate association evidence only.

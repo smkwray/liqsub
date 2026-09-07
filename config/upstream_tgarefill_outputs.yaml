@@ -31,3 +31,52 @@ required_exports:
       - beta
       - se_nw
       - t_stat_nw
+  canonical_bill_surprise_shocks:
+    local_path: data/raw/tgarefill/canonical_bill_surprise_shocks.csv
+    source_hint: ../tgarefill/outputs/tables/canonical_bill_surprise_shocks.csv
+    required_columns:
+      - date
+      - bill_size_surprise
+      - bill_size_surprise_announcement_week
+      - tax_receipt_surprise
+      - rapid_rebuild_flag
+      - sample
+      - canonical_sample_end
+  promotion_robustness_summary:
+    local_path: data/raw/tgarefill/promotion_robustness_summary.csv
+    source_hint: ../tgarefill/outputs/tables/promotion_robustness_summary.csv
+    required_columns:
+      - spec
+      - response_var
+      - response_label
+      - shock_sd_bn
+      - h4_effect_bn
+      - h4_t_stat_nw
+      - h4_significant_5pct
+  mmfalloc_downstream_summary:
+    local_path: data/raw/tgarefill/mmfalloc_downstream_summary.csv
+    source_hint: ../tgarefill/outputs/tables/mmfalloc_downstream_summary.csv
+    required_columns:
+      - metric
+      - value
+      - unit
+      - note
+  mmfalloc_source_gates:
+    local_path: data/raw/tgarefill/mmfalloc_source_gates.csv
+    source_hint: ../tgarefill/outputs/tables/mmfalloc_source_gates.csv
+    required_columns:
+      - gate
+      - passed
+      - value
+      - threshold
+      - note
+  mmfalloc_baseline:
+    local_path: data/raw/tgarefill/mmfalloc_baseline.csv
+    source_hint: ../tgarefill/outputs/tables/mmfalloc_baseline.csv
+    required_columns:
+      - event_month
+      - horizon
+      - category
+      - delta_millions
+      - event_bill_surprise_millions
+      - delta_per_bill_surprise

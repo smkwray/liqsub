@@ -31,6 +31,8 @@ from liqsub.tgarefill import (
     weekly_placebo_tests,
     weekly_stable_claim_candidates,
     weekly_terminal_period_qa,
+    tgarefill_promotion_reconciliation,
+    write_tgarefill_promotion_reconciliation_report,
 )
 
 
@@ -76,6 +78,52 @@ def _write_minimal_tgarefill_exports(raw) -> None:
     (raw / "auction_shock_lp.csv").write_text(
         "response_var,horizon,beta,se,se_nw,t_stat,t_stat_nw\n"
         "deposits,0,1,1,1,1,1\n",
+        encoding="utf-8",
+    )
+    (raw / "canonical_bill_surprise_shocks.csv").write_text(
+        "date,bill_size_surprise,bill_size_surprise_announcement_week,tax_receipt_surprise,"
+        "rapid_rebuild_flag,regime,rmp_regime,sample,canonical_sample_end\n"
+        "2024-01-03,0,0,0,0,on_rrp_scarce,pre_rmp,canonical_pre_rmp_through_2025_11,2025-11-30\n"
+        "2024-01-10,10,12,0,1,on_rrp_scarce,pre_rmp,canonical_pre_rmp_through_2025_11,2025-11-30\n",
+        encoding="utf-8",
+    )
+    (raw / "promotion_robustness_summary.csv").write_text(
+        "spec,response_var,response_label,shock_sd_bn,placebo_significant_count,"
+        "all_channel_placebo_significant_count,h4_effect_bn,h4_t_stat_nw,h4_significant_5pct,note\n"
+        "canonical_issue_week,mmf_treasury_holdings,MMF Treasury Holdings,18.8,0,1,44.1,3.8,True,main\n"
+        "canonical_issue_week,on_rrp_daily_total,ON RRP,18.8,1,1,-30.4,-5.0,True,main\n"
+        "canonical_issue_week,commercial_bank_deposits_weekly_nsa,Bank Deposits,18.8,0,1,6.9,0.6,False,boundary\n"
+        "canonical_issue_week,reserve_balances_weekly_wednesday,Reserves,18.8,0,1,-1.8,-0.2,False,boundary\n"
+        "same_week_announcement_timing,mmf_treasury_holdings,MMF Treasury Holdings,18.9,0,3,35.8,3.9,True,timing\n"
+        "same_week_announcement_timing,on_rrp_daily_total,ON RRP,18.9,0,3,-35.6,-6.1,True,timing\n"
+        "same_week_announcement_timing,commercial_bank_deposits_weekly_nsa,Bank Deposits,18.9,0,3,11.1,1.0,False,timing\n"
+        "same_week_announcement_timing,reserve_balances_weekly_wednesday,Reserves,18.9,1,3,1.8,0.1,False,timing\n",
+        encoding="utf-8",
+    )
+    (raw / "mmfalloc_downstream_summary.csv").write_text(
+        "metric,value,unit,note\n"
+        "source_gates_passed,True,boolean,All gates pass\n"
+        "sample_start,2022-12-31,date,First month\n"
+        "sample_end,2025-11-30,date,Last month\n"
+        "event_count,4,events,Events represented\n"
+        "mean_event_delta_treasury_total,229261.771,USD millions,Mean delta\n"
+        "mean_event_delta_fed_onrrp,-141051.2669,USD millions,Mean delta\n"
+        "mean_event_delta_repo_ex_fed,-10898.5529,USD millions,Mean delta\n"
+        "claim_boundary,focused_tga_refill_mmf_allocation_support_only,label,Boundary\n",
+        encoding="utf-8",
+    )
+    (raw / "mmfalloc_source_gates.csv").write_text(
+        "gate,passed,value,threshold,note\n"
+        "coverage,True,36,36,Contiguous months\n"
+        "required_fields,True,True,true,Required fields\n"
+        "mapping,True,1.0,0.95,Mapped share\n"
+        "reconciliation,True,0.0421,<=0.75,Reconciliation\n",
+        encoding="utf-8",
+    )
+    (raw / "mmfalloc_baseline.csv").write_text(
+        "event_month,horizon,category,delta_millions,event_bill_surprise_millions,delta_per_bill_surprise\n"
+        "2023-06-30,0_vs_minus1,treasury_bills,100.0,190000.0,0.0005\n"
+        "2023-06-30,0_vs_minus1,fed_onrrp,-80.0,190000.0,-0.0004\n",
         encoding="utf-8",
     )
 
@@ -170,6 +218,23 @@ def test_weekly_tgarefill_panel_builds_from_csv_exports(tmp_path) -> None:
     assert isinstance(abnormal, pd.DataFrame)
     assert isinstance(final_review, pd.DataFrame)
     assert readiness.loc[0, "readiness_status"] == "blocked"
+
+
+def test_tgarefill_promotion_reconciliation_promotes_focused_claim(tmp_path) -> None:
+    raw = tmp_path / "data" / "raw" / "tgarefill"
+    _write_minimal_tgarefill_exports(raw)
+
+    out = tgarefill_promotion_reconciliation(tmp_path)
+    report_path = tmp_path / "output" / "reports" / "tgarefill_promotion_reconciliation.md"
+    write_tgarefill_promotion_reconciliation_report(out, path=report_path)
+
+    assert set(out["status"]) >= {"supported_focused_claim", "not_supported_as_channel"}
+    promoted = out.loc[out["status"] == "supported_focused_claim", "channel"]
+    assert set(promoted) == {"MMF Treasury Holdings", "ON RRP"}
+    validation = out.loc[out["status"] == "imported_descriptive_allocation"].iloc[0]
+    assert validation["claim_label"] == "focused_tga_refill_mmf_allocation_support_only"
+    assert "Broad `liqsub` substitution remains blocked" in report_path.read_text(encoding="utf-8")
+    assert "Fund-Level MMF Validation" in report_path.read_text(encoding="utf-8")
 
 
 def test_weekly_large_rebuild_randomization_inference_is_event_matched(tmp_path) -> None:
@@ -625,3 +690,37 @@ def test_weekly_event_isolation_keeps_largest_rebuild_in_cluster() -> None:
     assert list(clean["event_id"]) == ["large", "later"]
     assert list(exclusions["event_id"]) == ["small"]
     assert "clustered_within_8_weeks" in exclusions.loc[0, "exclusion_reason"]
+
+
+def test_promotion_unknown_boolean_and_missing_placebo_do_not_promote(tmp_path):
+    raw = tmp_path / "data/raw/tgarefill"
+    _write_minimal_tgarefill_exports(raw)
+    path = raw / "promotion_robustness_summary.csv"
+    frame = pd.read_csv(path)
+    frame["h4_significant_5pct"] = frame["h4_significant_5pct"].astype(object)
+    frame.loc[0, "h4_significant_5pct"] = "unknown"
+    frame.loc[1, "h4_significant_5pct"] = "False"
+    frame.to_csv(path, index=False)
+    out = tgarefill_promotion_reconciliation(tmp_path)
+    assert not out.status.eq("supported_focused_claim").any()
+    assert out.loc[out.channel.eq("MMF Treasury Holdings"), "status"].iloc[0] == "blocked_incomplete_evidence"
+    frame = frame.loc[frame.spec.eq("canonical_issue_week")]
+    frame["h4_significant_5pct"] = True
+    frame.to_csv(path, index=False)
+    out = tgarefill_promotion_reconciliation(tmp_path)
+    assert not out.status.eq("supported_focused_claim").any()
+    assert out.loc[out.channel.eq("ON RRP"), "pretrend_status"].iloc[0] == "missing_same_week_placebo_evidence"
+
+
+def test_mmf_summary_cannot_override_missing_or_failed_source_gates(tmp_path):
+    raw = tmp_path / "data/raw/tgarefill"
+    _write_minimal_tgarefill_exports(raw)
+    path = raw / "mmfalloc_source_gates.csv"
+    path.write_text(path.read_text().replace("mapping,True", "mapping,False"))
+    out = tgarefill_promotion_reconciliation(tmp_path)
+    mmf = out.loc[out.channel.eq("Fund-level MMF allocation")].iloc[0]
+    assert mmf.status == "blocked_mmfalloc_gates"
+    assert mmf.permitted_language == ""
+    path.unlink()
+    out = tgarefill_promotion_reconciliation(tmp_path)
+    assert out.loc[out.channel.eq("Fund-level MMF allocation"), "claim_use"].iloc[0] == "not_available"
