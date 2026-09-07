@@ -385,3 +385,23 @@ def test_evidence_gate_summary_combines_monthly_and_weekly(tmp_path) -> None:
     assert "evidence_gate_summary" in paths
     assert paths["evidence_gate_summary"] == "output/tables/evidence_gate_summary.csv"
     assert not paths["evidence_gate_report"].startswith("/")
+
+
+def test_tgarefill_gate_requires_boundary_rows():
+    from liqsub.analysis import _tgarefill_promotion_gate_row
+    positive = [{"channel": c, "status": "supported_focused_claim", "h4_effect_bn": x, "h4_t_stat_nw": t, "aggregate_complete": True}
+                for c, x, t in [("ON RRP", -30, -5), ("MMF Treasury Holdings", 44, 3.8)]]
+    out = _tgarefill_promotion_gate_row(pd.DataFrame(positive))
+    assert out["claim_use"] != "aggregate_association_with_boundaries"
+    boundaries = [{"channel": c, "status": "not_supported_as_channel", "h4_effect_bn": 0, "h4_t_stat_nw": 0, "aggregate_complete": True}
+                  for c in ["Bank Deposits", "Reserves"]]
+    out = _tgarefill_promotion_gate_row(pd.DataFrame(positive + boundaries))
+    assert out["claim_use"] == "aggregate_association_with_boundaries"
+
+    # Nullable completeness flags must not disappear under pandas all(skipna=True).
+    table = pd.DataFrame(positive + boundaries)
+    table["aggregate_complete"] = pd.NA
+    assert _tgarefill_promotion_gate_row(table)["claim_use"] != "aggregate_association_with_boundaries"
+    table["aggregate_complete"] = pd.Series(True, index=table.index, dtype="boolean")
+    table.loc[0, "aggregate_complete"] = pd.NA
+    assert _tgarefill_promotion_gate_row(table)["claim_use"] != "aggregate_association_with_boundaries"

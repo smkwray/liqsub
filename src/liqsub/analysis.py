@@ -2170,7 +2170,10 @@ def _tgarefill_promotion_gate_row(promotion: pd.DataFrame) -> dict[str, object]:
     supported = promotion.loc[promotion["status"] == "supported_focused_claim"]
     boundaries = promotion.loc[promotion["status"] == "not_supported_as_channel"]
     complete = (set(supported["channel"]) == {"MMF Treasury Holdings", "ON RRP"}
-                and not supported.duplicated("channel").any())
+                and set(boundaries["channel"]) == {"Bank Deposits", "Reserves"}
+                and not promotion.duplicated("channel").any()
+                and "aggregate_complete" in promotion
+                and promotion.loc[promotion.channel.isin(["MMF Treasury Holdings", "ON RRP", "Bank Deposits", "Reserves"]), "aggregate_complete"].astype("string").str.lower().eq("true").fillna(False).all())
     effects = []
     for row in supported.itertuples(index=False):
         effects.append(f"{row.channel} {float(row.h4_effect_bn):+.1f}B t={float(row.h4_t_stat_nw):.1f}")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from liqsub.tgarefill import (
     _isolate_weekly_events,
@@ -127,6 +129,39 @@ def _write_minimal_tgarefill_exports(raw) -> None:
         encoding="utf-8",
     )
 
+    # Give the gate a coherent synthetic authority graph, not summary-only claims.
+    shocks = pd.read_csv(raw / "canonical_bill_surprise_shocks.csv")
+    shocks["bill_size_surprise"] = [0, 18_800 * np.sqrt(2)]
+    shocks["bill_size_surprise_announcement_week"] = [0, 18_900 * np.sqrt(2)]
+    shocks.to_csv(raw / "canonical_bill_surprise_shocks.csv", index=False)
+    summary = pd.read_csv(raw / "promotion_robustness_summary.csv")
+    specs = {
+        "canonical_issue_week": ("bill_surprise", "canonical_pre_rmp_through_2025_11", "issue_week"),
+        "same_week_announcement_timing": ("bill_surprise_announcement_week", "same_week_timing_canonical_pre_rmp", "announcement_week"),
+    }
+    lp_rows = []
+    for row in summary.itertuples(index=False):
+        spec, sample, timing = specs[row.spec]
+        for horizon in [-4, -3, -2, -1, 4]:
+            t = row.h4_t_stat_nw if horizon == 4 else 2.5 if horizon == -4 and row.placebo_significant_count else 0.5
+            beta = row.h4_effect_bn / row.shock_sd_bn if horizon == 4 else t
+            lp_rows.append({"response_var": row.response_var, "horizon": horizon,
+                            "beta": beta, "se_nw": beta / t, "t_stat_nw": t,
+                            "significant_5pct": abs(t) > 1.96, "n_obs": 100,
+                            "regime": np.nan, "shock_spec": spec, "sample": sample,
+                            "timing": timing, "canonical_sample_end": "2025-11-30"})
+    pd.DataFrame(lp_rows).to_csv(raw / "auction_shock_lp.csv", index=False)
+    categories = {"treasury_bills": 100000, "treasury_coupons": 129261.771,
+                  "fed_onrrp": -141051.2669, "private_treasury_repo": -10000,
+                  "agency_repo": -898.5529, "agency_debt": 0,
+                  "private_instruments": 0, "cash_other": 0, "total_assets": 50000}
+    baseline = [{"event_month": month, "horizon": "0_vs_minus1", "category": category,
+                 "delta_millions": delta, "event_bill_surprise_millions": 190000,
+                 "delta_per_bill_surprise": delta / 190000}
+                for month in ["2023-02-28", "2023-06-30", "2024-02-29", "2025-02-28"]
+                for category, delta in categories.items()]
+    pd.DataFrame(baseline).to_csv(raw / "mmfalloc_baseline.csv", index=False)
+
 
 def test_validate_tgarefill_exports_catches_duplicate_week(tmp_path) -> None:
     raw = tmp_path / "data" / "raw" / "tgarefill"
@@ -234,7 +269,7 @@ def test_tgarefill_promotion_reconciliation_promotes_focused_claim(tmp_path) -> 
     validation = out.loc[out["status"] == "imported_descriptive_allocation"].iloc[0]
     assert validation["claim_label"] == "focused_tga_refill_mmf_allocation_support_only"
     assert "Broad `liqsub` substitution remains blocked" in report_path.read_text(encoding="utf-8")
-    assert "Fund-Level MMF Validation" in report_path.read_text(encoding="utf-8")
+    assert "Descriptive MMF Allocation" in report_path.read_text(encoding="utf-8")
 
 
 def test_weekly_large_rebuild_randomization_inference_is_event_matched(tmp_path) -> None:
@@ -724,3 +759,96 @@ def test_mmf_summary_cannot_override_missing_or_failed_source_gates(tmp_path):
     path.unlink()
     out = tgarefill_promotion_reconciliation(tmp_path)
     assert out.loc[out.channel.eq("Fund-level MMF allocation"), "claim_use"].iloc[0] == "not_available"
+
+
+@pytest.mark.parametrize("missing", ["canonical_bill_surprise_shocks.csv", "auction_shock_lp.csv"])
+def test_promotion_requires_raw_authority_inputs(tmp_path, missing):
+    raw = tmp_path / "data/raw/tgarefill"
+    _write_minimal_tgarefill_exports(raw)
+    (raw / missing).unlink()
+    out = tgarefill_promotion_reconciliation(tmp_path)
+    assert not out.status.eq("supported_focused_claim").any()
+    aggregate = out.loc[out.channel.ne("Fund-level MMF allocation")]
+    assert aggregate.permitted_language.eq("").all()
+
+
+@pytest.mark.parametrize("removed", ["ON RRP", "MMF Treasury Holdings", "Bank Deposits", "Reserves"])
+def test_promotion_is_atomic_across_named_channels(tmp_path, removed):
+    raw = tmp_path / "data/raw/tgarefill"
+    _write_minimal_tgarefill_exports(raw)
+    p = raw / "promotion_robustness_summary.csv"
+    summary = pd.read_csv(p)
+    summary.loc[~(summary.spec.eq("same_week_announcement_timing") & summary.response_label.eq(removed))].to_csv(p, index=False)
+    out = tgarefill_promotion_reconciliation(tmp_path)
+    assert not out.status.eq("supported_focused_claim").any()
+    assert out.loc[out.channel.ne("Fund-level MMF allocation"), "permitted_language"].eq("").all()
+
+
+@pytest.mark.parametrize("file,column,value", [
+    ("promotion_robustness_summary.csv", "h4_t_stat_nw", 0.1),
+    ("promotion_robustness_summary.csv", "h4_significant_5pct", False),
+    ("promotion_robustness_summary.csv", "shock_sd_bn", 999),
+    ("promotion_robustness_summary.csv", "placebo_significant_count", 99),
+    ("auction_shock_lp.csv", "significant_5pct", False),
+    ("auction_shock_lp.csv", "sample", "wrong_sample"),
+    ("auction_shock_lp.csv", "timing", "wrong_timing"),
+    ("auction_shock_lp.csv", "shock_spec", "wrong_shock"),
+])
+def test_promotion_rejects_significance_mismatch(tmp_path, file, column, value):
+    raw = tmp_path / "data/raw/tgarefill"
+    _write_minimal_tgarefill_exports(raw)
+    path = raw / file
+    table = pd.read_csv(path)
+    mask = table.response_var.eq("on_rrp_daily_total")
+    if "horizon" in table:
+        mask &= table.horizon.eq(4)
+    table.loc[mask, column] = value
+    table.to_csv(path, index=False)
+    assert not tgarefill_promotion_reconciliation(tmp_path).status.eq("supported_focused_claim").any()
+
+
+@pytest.mark.parametrize("metric", ["claim_boundary", "sample_start", "sample_end", "event_count", "mean_event_delta_treasury_total", "mean_event_delta_fed_onrrp", "mean_event_delta_repo_ex_fed"])
+def test_mmf_summary_requires_claim_metrics(tmp_path, metric):
+    raw = tmp_path / "data/raw/tgarefill"
+    _write_minimal_tgarefill_exports(raw)
+    path = raw / "mmfalloc_downstream_summary.csv"
+    summary = pd.read_csv(path)
+    summary.loc[summary.metric.ne(metric)].to_csv(path, index=False)
+    out = tgarefill_promotion_reconciliation(tmp_path)
+    mmf = out.loc[out.channel.eq("Fund-level MMF allocation")].iloc[0]
+    assert mmf.status == "blocked_mmfalloc_gates" and mmf.permitted_language == ""
+    write_tgarefill_promotion_reconciliation_report(out, path=tmp_path / "report.md")
+
+
+@pytest.mark.parametrize("defect", ["false_mean", "duplicate", "wrong_ratio", "missing_category", "wrong_horizon", "wrong_event_count", "invalid_dates", "wrong_boundary", "same_month_dates"])
+def test_mmf_summary_must_match_baseline(tmp_path, defect):
+    raw = tmp_path / "data/raw/tgarefill"
+    _write_minimal_tgarefill_exports(raw)
+    path = raw / "mmfalloc_baseline.csv"
+    baseline = pd.read_csv(path)
+    summary_path = raw / "mmfalloc_downstream_summary.csv"
+    summary = pd.read_csv(summary_path)
+    if defect == "false_mean":
+        summary.loc[summary.metric.eq("mean_event_delta_treasury_total"), "value"] = "999999999"
+    elif defect == "duplicate":
+        baseline = pd.concat([baseline, baseline.iloc[[0]]])
+    elif defect == "wrong_ratio":
+        baseline.loc[0, "delta_per_bill_surprise"] = 99
+    elif defect == "missing_category":
+        baseline = baseline.iloc[1:]
+    elif defect == "wrong_horizon":
+        baseline.loc[0, "horizon"] = "1_vs_minus1"
+    elif defect == "wrong_event_count":
+        summary.loc[summary.metric.eq("event_count"), "value"] = "3.5"
+    elif defect == "invalid_dates":
+        summary.loc[summary.metric.eq("sample_end"), "value"] = "bad"
+    elif defect == "same_month_dates":
+        months = baseline.event_month.unique()
+        baseline["event_month"] = baseline.event_month.replace({months[0]: "2023-02-14", months[1]: "2023-02-28"})
+    else:
+        summary.loc[summary.metric.eq("claim_boundary"), "value"] = "causal"
+    summary.to_csv(summary_path, index=False)
+    baseline.to_csv(path, index=False)
+    out = tgarefill_promotion_reconciliation(tmp_path)
+    mmf = out.loc[out.channel.eq("Fund-level MMF allocation")].iloc[0]
+    assert mmf.status == "blocked_mmfalloc_gates" and mmf.permitted_language == ""

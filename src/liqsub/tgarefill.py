@@ -233,7 +233,7 @@ TGAREFILL_EXPORTS = {
     },
     "auction_shock_lp": {
         "path": Path("data/raw/tgarefill/auction_shock_lp.csv"),
-        "required": ["response_var", "horizon", "beta", "se_nw", "t_stat_nw"],
+        "required": ["response_var", "horizon", "beta", "se_nw", "t_stat_nw", "significant_5pct", "n_obs", "regime", "shock_spec", "sample", "timing", "canonical_sample_end"],
         "numeric_columns": ["horizon", "beta", "se_nw", "t_stat_nw"],
     },
     "canonical_bill_surprise_shocks": {
@@ -735,106 +735,166 @@ def _observed_bool(value: object) -> bool | None:
     return None
 
 
+PROMOTION_CHANNELS = {
+    "MMF Treasury Holdings": "mmf_treasury_holdings",
+    "ON RRP": "on_rrp_daily_total",
+    "Bank Deposits": "commercial_bank_deposits_weekly_nsa",
+    "Reserves": "reserve_balances_weekly_wednesday",
+}
+PROMOTION_SPECS = {
+    "canonical_issue_week": ("bill_surprise", "canonical_pre_rmp_through_2025_11", "issue_week", "bill_size_surprise"),
+    "same_week_announcement_timing": ("bill_surprise_announcement_week", "same_week_timing_canonical_pre_rmp", "announcement_week", "bill_size_surprise_announcement_week"),
+}
+# Upstream summaries round effects (billions), t statistics and shock SDs to 4 decimals.
+SUMMARY_ROUNDING_ATOL = 0.000051
+
+
+def _promotion_authority(summary: pd.DataFrame, lp: pd.DataFrame, shocks: pd.DataFrame) -> dict[tuple[str, str], dict[str, object]]:
+    """Reconcile copied summaries to named LP rows and observed shock scales."""
+    required_lp = {"response_var", "horizon", "beta", "se_nw", "t_stat_nw", "significant_5pct", "n_obs", "regime", "shock_spec", "sample", "timing", "canonical_sample_end"}
+    required_shocks = {"date", "sample", "canonical_sample_end", "bill_size_surprise", "bill_size_surprise_announcement_week"}
+    if not required_lp.issubset(lp) or not required_shocks.issubset(shocks):
+        return {}
+    dates = pd.to_datetime(shocks["date"], errors="coerce")
+    if (shocks.empty or dates.isna().any() or dates.duplicated().any()
+            or not shocks["sample"].eq(PROMOTION_SPECS["canonical_issue_week"][1]).all()
+            or not shocks["canonical_sample_end"].eq("2025-11-30").all()
+            or dates.gt(pd.Timestamp("2025-11-30")).any()):
+        return {}
+    result = {}
+    for spec, (shock_spec, sample, timing, shock_column) in PROMOTION_SPECS.items():
+        values = pd.to_numeric(shocks[shock_column], errors="coerce")
+        if not np.isfinite(values).all() or len(values) < 2:
+            continue
+        sd_bn = float(values.std(ddof=1) / 1000)
+        if sd_bn <= 0:
+            continue
+        selected = lp.loc[lp.shock_spec.eq(shock_spec) & lp["sample"].eq(sample) & lp.timing.eq(timing) & lp.regime.isna()].copy()
+        selected["horizon"] = pd.to_numeric(selected.horizon, errors="coerce")
+        if not selected.canonical_sample_end.eq("2025-11-30").all():
+            continue
+        for channel, response in PROMOTION_CHANNELS.items():
+            summary_rows = summary.loc[summary.spec.eq(spec) & summary.response_label.eq(channel)]
+            source = selected.loc[selected.response_var.eq(response)]
+            head = source.loc[source.horizon.eq(4)]
+            leads = source.loc[source.horizon.lt(0)]
+            if (len(summary_rows) != 1 or len(head) != 1 or len(leads) != 4
+                    or set(leads.horizon) != {-4, -3, -2, -1}):
+                continue
+            row, h4 = summary_rows.iloc[0], head.iloc[0]
+            if row.response_var != response:
+                continue
+            numeric = pd.to_numeric(h4[["beta", "se_nw", "t_stat_nw", "n_obs"]], errors="coerce")
+            if not np.isfinite(numeric).all() or numeric.se_nw <= 0 or numeric.n_obs <= 0 or numeric.n_obs % 1:
+                continue
+            significant = _observed_bool(h4.significant_5pct)
+            if significant is None or significant != (abs(numeric.t_stat_nw) > 1.96):
+                continue
+            if not np.isclose(numeric.beta / numeric.se_nw, numeric.t_stat_nw, rtol=1e-8, atol=1e-8):
+                continue
+            lead_t = pd.to_numeric(leads.t_stat_nw, errors="coerce")
+            lead_flags = leads.significant_5pct.map(_observed_bool)
+            if not np.isfinite(lead_t).all() or lead_flags.isna().any() or not lead_flags.eq(lead_t.abs().gt(1.96)).all():
+                continue
+            hits = int(lead_flags.sum())
+            expected = {"h4_effect_bn": numeric.beta * sd_bn, "h4_t_stat_nw": numeric.t_stat_nw, "shock_sd_bn": sd_bn, "placebo_significant_count": hits}
+            observed = pd.to_numeric(row[list(expected)], errors="coerce")
+            if (not np.isfinite(observed).all()
+                    or not np.allclose(observed, list(expected.values()), rtol=0, atol=SUMMARY_ROUNDING_ATOL)
+                    or _observed_bool(row.h4_significant_5pct) is not significant):
+                continue
+            result[(spec, channel)] = {**expected, "n_obs": int(numeric.n_obs), "sample": sample, "timing": timing, "shock_spec": shock_spec, "significant": significant}
+    return result
+
+
 def tgarefill_promotion_reconciliation(root: Path) -> pd.DataFrame:
-    """Summarize the promoted upstream tgarefill claim alongside liqsub gates."""
-    summary_path = root / TGAREFILL_EXPORTS["promotion_robustness_summary"]["path"]
-    if not summary_path.exists():
-        return pd.DataFrame(
-            [
-                {
-                    "claim_id": "focused_tga_refill_bill_surprise",
-                    "status": "blocked_missing_upstream",
-                    "claim_use": "not_available",
-                    "evidence_basis": "upstream_summary_unavailable",
-                    "channel": "unavailable",
-                    "h4_effect_bn": pd.NA,
-                    "h4_t_stat_nw": pd.NA,
-                    "significant_5pct": pd.NA,
-                    "pretrend_status": "missing_upstream_summary",
-                    "broad_substitution_reconciliation": "broad_liqsub_substitution_remains_blocked",
-                    "permitted_language": "",
-                    "forbidden_upgrade": "do_not_claim_general_bill_deposit_substitution",
-                    "primary_artifacts": str(summary_path.relative_to(root)),
-                }
-            ]
-        )
-    summary = pd.read_csv(summary_path)
-    required = TGAREFILL_EXPORTS["promotion_robustness_summary"]["required"]
-    if any(column not in summary for column in required):
-        raise ValueError("Incomplete upstream promotion summary schema")
-    if summary.duplicated(["spec", "response_label"]).any():
-        raise ValueError("Duplicate upstream promotion specification/channel")
-    canonical = summary.loc[summary["spec"] == "canonical_issue_week"].copy()
-    same_week = summary.loc[summary["spec"] == "same_week_announcement_timing"].copy()
-    rows: list[dict[str, object]] = []
-    promoted_channels = {"MMF Treasury Holdings", "ON RRP"}
-    non_promoted_channels = {"Bank Deposits", "Reserves"}
-    same_week_pretrend_hits = _promotion_pretrend_hits(same_week)
-    for row in canonical.itertuples(index=False):
-        channel = str(row.response_label)
-        h4_effect = pd.to_numeric(pd.Series([row.h4_effect_bn]), errors="coerce").iloc[0]
-        t_stat = pd.to_numeric(pd.Series([row.h4_t_stat_nw]), errors="coerce").iloc[0]
-        significant = _observed_bool(row.h4_significant_5pct)
-        evidence_complete = (
-            significant is not None and np.isfinite(h4_effect) and np.isfinite(t_stat)
-            and channel in same_week_pretrend_hits
-        )
-        expected_direction = (channel == "MMF Treasury Holdings" and h4_effect > 0) or (
-            channel == "ON RRP" and h4_effect < 0
-        )
-        if not evidence_complete:
-            status = "blocked_incomplete_evidence"
-            claim_use = "not_available"
-            permitted = ""
-        elif (channel in promoted_channels and significant and expected_direction
-              and same_week_pretrend_hits[channel] == 0):
-            status = "supported_focused_claim"
-            claim_use = "aggregate_association"
-            permitted = (
-                "Bill surprises during the selected TGA rebuild sample are associated with "
-                "higher MMF Treasury holdings and lower ON RRP balances."
-            )
-        elif channel in non_promoted_channels and not significant:
-            status = "not_supported_as_channel"
-            claim_use = "boundary_condition"
-            permitted = "No robust bank-deposit or reserve drain in the promoted design."
-        else:
-            status = "appendix_context"
-            claim_use = "diagnostic"
-            permitted = "Use only as supporting context."
-        rows.append(
-            {
-                "claim_id": "focused_tga_refill_bill_surprise",
-                "status": status,
-                "claim_use": claim_use,
-                "evidence_basis": "tgarefill_canonical_pre_rmp_bill_surprise_lp",
-                "channel": channel,
-                "h4_effect_bn": h4_effect,
-                "h4_t_stat_nw": t_stat,
-                "significant_5pct": significant,
-                "pretrend_status": (
-                    "missing_same_week_placebo_evidence"
-                    if channel not in same_week_pretrend_hits
-                    else "same_week_timing_has_no_significant_placebo"
-                    if same_week_pretrend_hits[channel] == 0
-                    else "same_week_timing_has_remaining_placebo"
-                ),
-                "broad_substitution_reconciliation": (
-                    "broad_liqsub_substitution_remains_blocked"
-                ),
-                "permitted_language": permitted,
-                "forbidden_upgrade": (
-                    "do_not_claim_causal_effect_final_ownership_funding_share_or_bill_deposit_substitution"
-                ),
-                "primary_artifacts": (
-                    "data/raw/tgarefill/promotion_robustness_summary.csv;"
-                    "data/raw/tgarefill/canonical_bill_surprise_shocks.csv;"
-                    "data/raw/tgarefill/auction_shock_lp.csv"
-                ),
-            }
-        )
+    """Import the joint association only after atomic source reconciliation."""
+    names = ("promotion_robustness_summary", "canonical_bill_surprise_shocks", "auction_shock_lp")
+    paths = {name: root / TGAREFILL_EXPORTS[name]["path"] for name in names}
+    authority = {}
+    if all(path.exists() for path in paths.values()):
+        summary = pd.read_csv(paths[names[0]])
+        required = set(TGAREFILL_EXPORTS[names[0]]["required"]) | {"placebo_significant_count"}
+        if not required.issubset(summary):
+            raise ValueError("Incomplete upstream promotion summary schema")
+        if summary.duplicated(["spec", "response_label"]).any():
+            raise ValueError("Duplicate upstream promotion specification/channel")
+        authority = _promotion_authority(summary, pd.read_csv(paths[names[2]]), pd.read_csv(paths[names[1]]))
+    positive = {"MMF Treasury Holdings": 1, "ON RRP": -1}
+    complete = len(authority) == len(PROMOTION_CHANNELS) * len(PROMOTION_SPECS)
+    if complete:
+        for channel, sign in positive.items():
+            row = authority[("canonical_issue_week", channel)]
+            timing = authority[("same_week_announcement_timing", channel)]
+            complete &= bool(row["significant"] and row["h4_effect_bn"] * sign > 0 and timing["placebo_significant_count"] == 0)
+        complete &= all(not authority[("canonical_issue_week", channel)]["significant"] for channel in ("Bank Deposits", "Reserves"))
+    rows = []
+    for channel in PROMOTION_CHANNELS:
+        row = authority.get(("canonical_issue_week", channel), {})
+        timing = authority.get(("same_week_announcement_timing", channel), {})
+        supported = complete and channel in positive
+        boundary = complete and channel not in positive
+        rows.append({
+            "claim_id": "focused_tga_refill_bill_surprise",
+            "status": "supported_focused_claim" if supported else "not_supported_as_channel" if boundary else "blocked_incomplete_evidence",
+            "claim_use": "aggregate_association" if supported else "boundary_condition" if boundary else "not_available",
+            "evidence_basis": "reconciled_tgarefill_canonical_pre_rmp_bill_surprise_lp",
+            "channel": channel,
+            "response_var": PROMOTION_CHANNELS[channel],
+            "h4_effect_bn": row.get("h4_effect_bn", pd.NA),
+            "h4_t_stat_nw": row.get("h4_t_stat_nw", pd.NA),
+            "significant_5pct": row.get("significant", pd.NA),
+            "shock_sd_bn": row.get("shock_sd_bn", pd.NA),
+            "n_obs": row.get("n_obs", pd.NA),
+            "sample": row.get("sample", ""), "timing": row.get("timing", ""), "shock_spec": row.get("shock_spec", ""),
+            "same_week_placebo_count": timing.get("placebo_significant_count", pd.NA),
+            "aggregate_complete": bool(complete),
+            "pretrend_status": "missing_same_week_placebo_evidence" if not timing else "same_week_timing_has_no_significant_placebo" if timing["placebo_significant_count"] == 0 else "same_week_timing_has_remaining_placebo",
+            "broad_substitution_reconciliation": "broad_liqsub_substitution_remains_blocked",
+            "permitted_language": ("Bill offering-size deviations in the selected sample are associated with higher MMF Treasury holdings and lower ON RRP balances; channel samples differ." if supported else "No robust bank-deposit or reserve drain in this design." if boundary else ""),
+            "forbidden_upgrade": "do_not_claim_causal_effect_final_ownership_funding_share_or_bill_deposit_substitution",
+            "primary_artifacts": ";".join(str(path.relative_to(root)) for path in paths.values()),
+        })
     rows.extend(_mmfalloc_validation_rows(root))
     return pd.DataFrame(rows)
+
+def _mmfalloc_integrity(summary_values: dict[str, object], baseline: pd.DataFrame) -> bool:
+    """Validate the displayed descriptive statistics, not just source feasibility."""
+    try:
+        if summary_values.get("claim_boundary") != "focused_tga_refill_mmf_allocation_support_only":
+            return False
+        start, end = pd.to_datetime([summary_values.get("sample_start"), summary_values.get("sample_end")], errors="coerce")
+        count = float(summary_values.get("event_count", "nan"))
+        if pd.isna(start) or pd.isna(end) or start > end or not np.isfinite(count) or count <= 0 or count % 1:
+            return False
+        months = pd.to_datetime(baseline["event_month"], errors="coerce")
+        if (months.isna().any() or not months.eq(months.dt.to_period("M").dt.to_timestamp("M")).all()
+                or not months.between(start, end).all() or months.nunique() != count):
+            return False
+        if baseline.assign(event_month=months).duplicated(["event_month", "category"]).any() or not baseline.horizon.eq("0_vs_minus1").all():
+            return False
+        categories = {"treasury_bills", "treasury_coupons", "fed_onrrp", "private_treasury_repo", "agency_repo", "agency_debt", "private_instruments", "cash_other", "total_assets"}
+        if any(set(group.category) != categories for _, group in baseline.groupby(months)):
+            return False
+        values = baseline.copy()
+        for column in TGAREFILL_EXPORTS["mmfalloc_baseline"]["numeric_columns"]:
+            values[column] = pd.to_numeric(values[column], errors="coerce")
+            if not np.isfinite(values[column]).all():
+                return False
+        shock = values.event_bill_surprise_millions
+        if not shock.gt(0).all() or values.groupby(months).event_bill_surprise_millions.nunique().ne(1).any():
+            return False
+        if not np.allclose(values.delta_per_bill_surprise, values.delta_millions / shock, rtol=1e-9, atol=1e-9):
+            return False
+        table = values.assign(event_month=months).pivot(index="event_month", columns="category", values="delta_millions")
+        metrics = {
+            "mean_event_delta_treasury_total": (table.treasury_bills + table.treasury_coupons).mean(),
+            "mean_event_delta_fed_onrrp": table.fed_onrrp.mean(),
+            "mean_event_delta_repo_ex_fed": (table.private_treasury_repo + table.agency_repo).mean(),
+        }
+        return all(np.isclose(float(summary_values.get(key, "nan")), value, rtol=0, atol=SUMMARY_ROUNDING_ATOL) for key, value in metrics.items())
+    except (ValueError, TypeError, KeyError):
+        return False
 
 
 def _mmfalloc_validation_rows(root: Path) -> list[dict[str, object]]:
@@ -844,11 +904,9 @@ def _mmfalloc_validation_rows(root: Path) -> list[dict[str, object]]:
     if not summary_path.exists():
         return []
     summary = pd.read_csv(summary_path)
-    summary_values = {
-        str(row.metric): row.value for row in summary.itertuples(index=False)
-    }
+    summary_values = dict(zip(summary["metric"].astype(str), summary["value"], strict=True)) if {"metric", "value"}.issubset(summary) else {}
     gates_passed = _observed_bool(summary_values.get("source_gates_passed")) is True
-    gates_passed = gates_passed and not summary.duplicated("metric").any()
+    gates_passed = gates_passed and "metric" in summary and not summary.duplicated("metric").any()
     if gates_path.exists() and baseline_path.exists():
         gates = pd.read_csv(gates_path)
         baseline = pd.read_csv(baseline_path)
@@ -868,6 +926,7 @@ def _mmfalloc_validation_rows(root: Path) -> list[dict[str, object]]:
                 ).all()
     else:
         gates_passed = False
+    gates_passed = gates_passed and _mmfalloc_integrity(summary_values, baseline)
     claim_label = str(summary_values.get("claim_boundary", ""))
     status = "imported_descriptive_allocation" if gates_passed else "blocked_mmfalloc_gates"
     return [
@@ -875,7 +934,7 @@ def _mmfalloc_validation_rows(root: Path) -> list[dict[str, object]]:
             "claim_id": "focused_tga_refill_mmfalloc_validation",
             "status": status,
             "claim_use": "descriptive_context" if gates_passed else "not_available",
-            "evidence_basis": "sec_nmfp_fund_level_mmf_allocation_validation",
+            "evidence_basis": "sec_nmfp_descriptive_allocation",
             "channel": "Fund-level MMF allocation",
             "h4_effect_bn": pd.NA,
             "h4_t_stat_nw": pd.NA,
@@ -910,17 +969,6 @@ def _mmfalloc_validation_rows(root: Path) -> list[dict[str, object]]:
             ),
         }
     ]
-
-
-def _promotion_pretrend_hits(summary: pd.DataFrame) -> dict[str, int]:
-    if summary.empty or not {"response_label", "placebo_significant_count"}.issubset(summary.columns):
-        return {}
-    hits = pd.to_numeric(summary["placebo_significant_count"], errors="coerce")
-    return {
-        str(label): int(hit)
-        for label, hit in zip(summary["response_label"], hits, strict=False)
-        if pd.notna(hit) and np.isfinite(hit) and hit >= 0 and hit == int(hit)
-    }
 
 
 def write_tgarefill_promotion_reconciliation_report(
@@ -965,14 +1013,14 @@ def write_tgarefill_promotion_reconciliation_report(
             f"NW t-stat {float(row.h4_t_stat_nw):.1f}; not promoted."
         )
     if not mmfalloc.empty:
-        lines.extend(["", "## Fund-Level MMF Validation", ""])
+        lines.extend(["", "## Descriptive MMF Allocation", ""])
         for row in mmfalloc.itertuples(index=False):
             if str(row.status) == "imported_descriptive_allocation":
                 lines.append(
                     "- SEC N-MFP `mmfalloc`: source gates pass for "
                     f"{row.sample_start} through {row.sample_end}; across "
                     f"{row.event_count} selected positive bill-surprise months, "
-                    f"Treasury allocations rise {float(row.mean_event_delta_treasury_total):+.1f}M, "
+                    f"Treasury allocations change {float(row.mean_event_delta_treasury_total):+.1f}M, "
                     f"Fed ON RRP changes {float(row.mean_event_delta_fed_onrrp):+.1f}M, "
                     f"and repo ex-Fed changes {float(row.mean_event_delta_repo_ex_fed):+.1f}M."
                 )
@@ -987,7 +1035,7 @@ def write_tgarefill_promotion_reconciliation_report(
             "## Claim Boundary",
             "",
             "Do not claim general bill-deposit substitution or a stable one-for-one liquidity-substitution system.",
-            "Use this only for unexpected bill issuance during TGA rebuilds.",
+            "Use this only as an association with trailing-median bill offering-size deviations.",
             "Do not infer household behavior, final ownership, or bank-deposit pass-through from the MMF panel.",
             "",
         ]
