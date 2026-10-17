@@ -1,22 +1,24 @@
 # liqsub
 
 `liqsub` builds a historical liquidity-plumbing diagnostics backend around Treasury supply,
-bank deposits, money-market funds, reserves, the Treasury General Account, and ON RRP.
+bank deposits, money-market funds, reserves, the Treasury General Account, and the overnight reverse repurchase agreement facility (ON RRP).
 
 The repository is designed as a reproducible historical snapshot, not a live data service. It
-ships source contracts, clean monthly and weekly panels, public diagnostic tables, release
-manifests, bundle checks, and conservative evidence gates. The generated outputs are meant for
+ships source contracts and code to generate monthly and weekly panels, diagnostic
+tables, manifests, and bundle checks. The generated outputs are meant for
 backend diagnostics and descriptive analysis; they do not establish a headline causal channel.
 
 ## Setup
 
-Use a project environment under `~/venvs`:
+Python 3.11 or later is required. From the repository root:
 
 ```bash
-python -m venv ~/venvs/liqsub
-source ~/venvs/liqsub/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 python -m pip install -e '.[dev]'
 python -B -m pytest -q
+ruff check .
+python -m liqsub.cli validate-config
 ```
 
 ## Source Snapshot
@@ -161,24 +163,16 @@ output/tables/monthly_future_row_qa.csv
 output/tables/weekly_terminal_period_qa.csv
 ```
 
-## Public/Private Boundary
+## Local files
 
 The following paths are local-only and must remain ignored or excluded from public bundles:
 
 ```text
-do/
-.env
 data/raw/
 data/interim/
 data/cache/
 output/internal/
 output/bundles/
-```
-
-Optional internal report generation is explicit and writes only under ignored `output/internal/`:
-
-```bash
-python -B -m liqsub.cli write-internal-reports
 ```
 
 Run `validate-public-boundary` before sharing a bundle.

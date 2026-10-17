@@ -35,3 +35,15 @@ build/
 .DS_Store
 .vscode/
 .idea/
+
+# Private local configuration
+.env.*
+.private-denylist
+.*-private-denylist
+venv/
+AGENTS.md
+CLAUDE.md
+.codex/
+.claude/
+.cursor/
+.worktrees/
