@@ -1,9 +1,9 @@
 # Public Artifact Contract
 
 This document separates stable backend artifacts from diagnostic outputs. Generated files under
-`output/` and `data/clean/` remain reproducible outputs, not source files. Private prose and
-planning artifacts must be generated only with `liqsub.cli write-internal-reports`; those files are
-written under ignored `output/internal/` and are excluded from the public manifest tier index.
+`output/` and `data/clean/` remain reproducible outputs, not source files. Internal reports are
+written only by `liqsub.cli write-internal-reports`, under ignored `output/internal/`, and are
+excluded from the public manifest tier index.
 
 ## Stable Backend Outputs
 
@@ -46,7 +46,7 @@ These artifacts are the public backend surface for downstream code:
 - `output/manifests/output_tiers.json`
 - `output/manifests/latest.json`
 
-Legacy compatibility aliases are still emitted for now:
+Legacy compatibility aliases are also emitted:
 
 - `output/tables/monthly_claim_readiness.csv`
 - `output/tables/weekly_claim_readiness.csv`
